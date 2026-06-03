@@ -1,0 +1,1416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PALTECH Audit & Mappings Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+    <style>
+        :root {
+            --primary: #005A9C; 
+            --secondary: #F0F4F8; 
+            --accent: #27AE60; 
+            --text: #2C3E50; 
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #E9ECEF;
+            margin: 0;
+            padding: 10px;
+            color: var(--text);
+            overflow-x: hidden; /* Prevents whole-page side scrolling */
+        }
+        
+        /* EXPANDED BODY DESIGN */
+        .app-container {
+            max-width: 1400px; /* Expanded from 1200px for more breathing room */
+            width: 98%; 
+            margin: 0 auto;
+            padding-bottom: 80px; 
+        }
+        @media(min-width: 768px) {
+            body { padding: 20px; }
+            .grid-inputs-metadata {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 15px;
+            }
+        }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header h2 { margin: 0; color: var(--primary); font-size: 1.5rem; }
+        .card {
+            background: #FFFFFF;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            border-top: 4px solid var(--primary);
+            max-width: 100%;
+        }
+        .card-title {
+            font-size: 1.1rem; font-weight: bold; margin-top: 0;
+            margin-bottom: 15px; color: var(--primary);
+            display: flex; align-items: center; gap: 10px;
+        }
+        .card-title > span:first-child {
+            background: var(--primary); color: white; border-radius: 50%;
+            width: 24px; height: 24px; display: inline-flex;
+            align-items: center; justify-content: center; font-size: 14px;
+            flex-shrink: 0;
+        }
+        #detailsPinNum { color: var(--primary); font-weight: bold; }
+        .input-group { margin-bottom: 15px; max-width: 100%; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; color: #596A7A; }
+        input[type="text"], input[type="file"], textarea {
+            width: 100%; padding: 12px; border: 1px solid #D1D9E0;
+            border-radius: 8px; font-size: 14px; background-color: var(--secondary);
+            box-sizing: border-box; transition: all 0.2s;
+        }
+        input:focus, textarea:focus { border-color: var(--primary); background-color: #fff; outline: none; }
+        .input-uppercase { text-transform: uppercase; }
+        .mac-invalid { border-color: #E74C3C !important; background-color: #FFF5F5 !important; }
+        .mac-valid { border-color: var(--accent) !important; }
+        .input-with-btn { display: flex; gap: 8px; align-items: stretch; }
+        .input-with-btn input { flex: 1; }
+        .btn-inline {
+            background: var(--primary); color: white; border: none;
+            padding: 0 12px; border-radius: 8px; cursor: pointer;
+            font-size: 18px; white-space: nowrap; flex-shrink: 0;
+            transition: background 0.15s;
+        }
+        .btn-inline:hover { background: #004a80; }
+        .btn-inline:disabled { background: #aaa; cursor: not-allowed; }
+        
+        /* Map Container */
+        .map-section { margin: 25px 0; }
+        .map-container-scroll {
+            width: 100%; overflow: auto; border: 2px dashed #D1D9E0;
+            background-color: #F8FAFC; border-radius: 8px; margin-top: 10px;
+            -webkit-overflow-scrolling: touch; 
+        }
+        .map-wrapper {
+            position: relative; min-width: 600px; width: 100%;
+            display: flex; justify-content: center; align-items: center; min-height: 350px;
+        }
+        #floorPlanImg { width: 100%; display: none; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
+        
+        /* Pins — SVG teardrop location marker */
+        .pin {
+            position: absolute;
+            width: 26px; height: 34px;
+            transform: translate(-50%, -100%);
+            cursor: grab; user-select: none; touch-action: none;
+            filter: drop-shadow(0 3px 5px rgba(0,0,0,0.38));
+            transition: filter 0.15s, transform 0.15s;
+            z-index: 5;
+        }
+        .pin:active { cursor: grabbing; }
+        .pin.active {
+            z-index: 10;
+            transform: translate(-50%, -100%) scale(1.25);
+            filter: drop-shadow(0 5px 8px rgba(0,0,0,0.5));
+        }
+        .pin svg { width: 100%; height: 100%; overflow: visible; }
+        .pin .pin-body { fill: #E74C3C; }
+        .pin.active .pin-body { fill: var(--accent); }
+
+        /* Survey history */
+        .history-card { border-top-color: #8E44AD !important; }
+        .history-toggle { cursor: pointer; user-select: none; }
+        .history-toggle .toggle-arrow { margin-left: auto; font-size: 0.75rem; color: #8E44AD; }
+        #historyList { margin-top: 10px; }
+        .history-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 14px; border-radius: 8px; background: #F8FAFC;
+            border: 1px solid #D1D9E0; margin-bottom: 8px; gap: 10px;
+        }
+        .history-item-meta { flex: 1; min-width: 0; }
+        .history-item-meta strong { display: block; font-size: 0.9rem; color: var(--primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .history-item-meta span { font-size: 0.78rem; color: #7f8c8d; }
+        .btn-history-load { background: var(--primary); color: white; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; white-space: nowrap; }
+        .btn-history-del  { background: none; color: #E74C3C; border: 1px solid #E74C3C; padding: 7px 10px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+
+        /* Delete pin button in card */
+        .btn-delete-pin {
+            background: #E74C3C; color: white; border: none;
+            padding: 10px 20px; border-radius: 8px; cursor: pointer;
+            font-weight: bold; font-size: 0.9rem; margin-top: 14px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .btn-delete-pin:hover { background: #c0392b; }
+
+        /* Login overlay */
+        #loginOverlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+            display: flex; align-items: center; justify-content: center; z-index: 9999;
+        }
+        .login-card {
+            background: white; border-radius: 16px; padding: 40px 36px;
+            max-width: 400px; width: 90%; text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+        }
+        .login-card h2 { color: var(--primary); margin: 0 0 8px; font-size: 1.5rem; }
+        .login-card p  { color: #596A7A; font-size: 0.9rem; margin: 0 0 28px; }
+        .btn-google {
+            background: white; color: #3c4043; border: 1px solid #dadce0;
+            padding: 12px 20px; border-radius: 8px; cursor: pointer;
+            font-size: 15px; font-weight: 600; width: 100%;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            transition: box-shadow 0.15s;
+        }
+        .btn-google:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+        #loginError { color: #E74C3C; font-size: 0.83rem; min-height: 18px; margin-top: 10px; }
+        #fbNotConfigured {
+            display: none; margin-top: 16px; padding: 12px; background: #F8FAFC;
+            border-radius: 8px; font-size: 0.82rem; color: #596A7A; line-height: 1.5;
+        }
+
+        /* User info bar */
+        #userInfoBar {
+            display: none; justify-content: flex-end; align-items: center;
+            gap: 12px; margin-bottom: 10px; font-size: 0.85rem; color: #596A7A;
+        }
+        .btn-signout {
+            background: none; color: #E74C3C; border: 1px solid #E74C3C;
+            padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+        }
+
+        /* History search bar */
+        .history-search {
+            display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+        }
+        .history-search input {
+            flex: 1; min-width: 130px; padding: 8px 10px;
+            border: 1px solid #D1D9E0; border-radius: 6px; font-size: 13px;
+            background: var(--secondary);
+        }
+        .history-search input[type="date"] { flex: 0 0 auto; }
+
+        /* Save / Load footer buttons */
+        .footer-left { display: flex; flex-direction: column; gap: 6px; }
+        .footer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+        .btn-secondary {
+            background: var(--primary); color: white; border: none;
+            padding: 9px 16px; font-size: 13px; font-weight: bold;
+            border-radius: 8px; cursor: pointer; transition: background 0.15s;
+        }
+        .btn-secondary:hover { background: #004a80; }
+        
+        #activePinDetailsCard { display: none; }
+
+        /* --- HARDWARE VISUALIZER CSS --- */
+        .port-mapping-scroll-container {
+            width: 100%; max-width: 100%; overflow-x: auto; background-color: #F8FAFC;
+            border: 1px solid #D1D9E0; padding: 15px; border-radius: 8px;
+            -webkit-overflow-scrolling: touch; box-sizing: border-box;
+        }
+        .port-mapping-container {
+            display: flex; flex-direction: column; min-width: 1100px; 
+        }
+        .switch-block { display: flex; flex-direction: column; gap: 4px; }
+        
+        /* RESPONSIVE BOTTOM SECTION */
+        .bottom-section {
+            display: grid; grid-template-columns: auto 1fr; 
+            gap: 25px; margin-top: 20px; padding-top: 20px;
+            border-top: 2px solid #BDC3C7; 
+        }
+        @media(max-width: 1024px) {
+            .bottom-section { grid-template-columns: 1fr; /* Stacks vertically on smaller screens */ }
+        }
+        
+        .uplink-block { display: flex; flex-direction: column; gap: 4px; max-width: 400px; }
+        .notes-block { display: flex; flex-direction: column; }
+        .notes-block textarea { height: 100%; min-height: 80px; resize: none; }
+
+        .port-row { display: grid; gap: 4px; }
+        .main-grid { grid-template-columns: repeat(24, 1fr); }
+        .uplink-grid { grid-template-columns: repeat(4, 1fr); }
+        
+        .toggle-container {
+            display: flex; justify-content: center; align-items: center;
+            padding: 2px 0; background: #EAECEE; border-radius: 4px;
+        }
+        .toggle-container input[type="checkbox"] {
+            cursor: pointer; width: 16px; height: 16px; accent-color: var(--accent); 
+        }
+        .toggle-container input[type="checkbox"]:disabled {
+            cursor: not-allowed; opacity: 0.4;
+        }
+
+        .port-label {
+            background: #2C3E50; color: white; text-align: center; font-size: 12px;
+            font-weight: bold; padding: 6px 0; border-radius: 4px; border: 1px solid #1A252F;
+        }
+        .pp-input {
+            width: 100%; box-sizing: border-box; text-align: center; font-size: 11px;
+            font-weight: bold; color: var(--primary); padding: 6px 2px !important; 
+            border: 2px solid #BDC3C7 !important; border-radius: 4px; background-color: #fff !important;
+        }
+        .pp-input:focus { border-color: var(--accent) !important; }
+        .row-spacer { height: 4px; } 
+
+        /* CUSTOM CONTEXT MENU */
+        #customContextMenu {
+            display: none; position: absolute; background: white;
+            border: 1px solid #D1D9E0; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 6px; padding: 8px 0; z-index: 1000; min-width: 150px;
+        }
+        .context-menu-item {
+            padding: 10px 15px; cursor: pointer; color: #E74C3C;
+            font-weight: bold; display: flex; align-items: center; gap: 8px;
+        }
+        .context-menu-item:hover { background: #F8FAFC; }
+
+        /* Footer */
+        .sticky-action-footer {
+            position: fixed; bottom: 0; left: 0; width: 100%;
+            background: rgba(255,255,255,0.95); padding: 12px;
+            box-shadow: 0 -4px 10px rgba(0,0,0,0.08);
+            display: flex; justify-content: space-between; align-items: center;
+            box-sizing: border-box; z-index: 100;
+        }
+        .btn-main-success {
+            background-color: var(--accent); color: white; border: none;
+            padding: 14px 28px; font-size: 15px; font-weight: bold;
+            border-radius: 8px; cursor: pointer; transition: all 0.15s;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Firebase Login Overlay -->
+<div id="loginOverlay">
+    <div class="login-card">
+        <div style="font-size:2.8rem;margin-bottom:10px;">🔧</div>
+        <h2>PALTECH Audit Tool</h2>
+        <p>Sign in to save and access your surveys from any device.</p>
+        <button class="btn-google" id="googleSignInBtn">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 002.38-5.88c0-.57-.05-.66-.15-1.18z"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.01a4.8 4.8 0 01-7.18-2.54H1.83v2.07A8 8 0 008.98 17z"/><path fill="#FBBC05" d="M4.5 10.52a4.8 4.8 0 010-3.04V5.41H1.83a8 8 0 000 7.18l2.67-2.07z"/><path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 001.83 5.4L4.5 7.49a4.77 4.77 0 014.48-3.31z"/></svg>
+            Sign in with Google
+        </button>
+        <div id="loginError"></div>
+        <div id="fbNotConfigured">
+            ⚠️ Firebase not configured yet.<br>
+            <a id="skipLoginBtn" href="#" style="color:var(--primary);font-weight:bold;">Continue offline (local only) →</a>
+        </div>
+    </div>
+</div>
+
+<div class="app-container">
+    <div id="userInfoBar">
+        <span id="userEmail"></span>
+        <button class="btn-signout" id="signOutBtn">Sign Out</button>
+    </div>
+    <div class="header">
+        <h2>PALTECH Audit & Technical Mapping</h2>
+    </div>
+
+    <!-- Survey History Panel -->
+    <div class="card history-card" id="surveyHistoryCard">
+        <div class="card-title history-toggle" id="historyToggle">
+            <span style="background:#8E44AD;">H</span>
+            Survey History
+            <span class="toggle-arrow" id="historyArrow">▼</span>
+        </div>
+        <div id="historyList" style="display:none;">
+            <div class="history-search">
+                <input type="text"  id="searchLocation" placeholder="Search by location or address…">
+                <input type="date"  id="searchDateFrom" title="From date">
+                <input type="date"  id="searchDateTo"   title="To date">
+                <button class="btn-secondary" id="searchBtn" style="padding:8px 14px;">🔍 Search</button>
+            </div>
+            <p id="historyEmpty" style="color:#7f8c8d; font-size:0.88rem; margin:0 0 8px;">No saved surveys yet. Use <b>💾 Save Survey</b> to store a session.</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title"><span>1</span> Audit Site Context</div>
+        <div class="grid-inputs-metadata">
+            <div class="input-group">
+                <label>Surveying Technician</label>
+                <input type="text" id="techName" value="Dean Sharawi">
+            </div>
+            <div class="input-group">
+                <label>Location / Facility Name</label>
+                <div class="input-with-btn">
+                    <input type="text" id="locName" placeholder="Menlo Park Campus">
+                    <button class="btn-inline" id="fetchLocBtn" title="Auto-fill from Site Address">⟳</button>
+                </div>
+            </div>
+            <div class="input-group">
+                <label>Site Address</label>
+                <div class="input-with-btn">
+                    <input type="text" id="siteAddress" placeholder="123 Technology Dr, Santa Clara, CA">
+                    <button class="btn-inline" id="gpsBtn" title="Get current GPS location">📍</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="map-section">
+        <h3>2. Location Mappings (Blueprint Integration)</h3>
+        <div class="input-group" style="margin-bottom: 15px;">
+            <label for="blueprintUpload">Upload Facility Blueprint Image</label>
+            <input type="file" id="blueprintUpload" accept="image/*">
+        </div>
+        <p style="font-size: 13px; color: #7f8c8d; margin-bottom: 10px;">
+            * Tap the map to add a pin. Drag a pin to reposition it. To delete: tap the pin to select it, then use the <b>Delete Pin</b> button below — or right-click on desktop.
+        </p>
+        <div class="map-container-scroll">
+            <div class="map-wrapper" id="mapWrapper">
+                <span id="placeholderMapText" style="color:#A0B2C1;">Waiting for blueprint image asset...</span>
+                <img id="floorPlanImg" src="" alt="PALTECH Blueprint Map" draggable="false">
+            </div>
+        </div>
+    </div>
+
+    <div class="card" id="activePinDetailsCard">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+            <h3 id="detailsTitle" class="card-title" style="margin:0;">
+                <span>3</span> Active Pin — <span id="detailsPinNum">#—</span>
+            </h3>
+            <button class="btn-delete-pin" id="deletePinCardBtn">🗑️ Delete Pin</button>
+        </div>
+        
+        <div class="grid-inputs-metadata">
+            <div class="input-group">
+                <label>Switch Device Label / ID</label>
+                <input type="text" id="field_label" placeholder="SW1" class="input-uppercase" maxlength="40">
+            </div>
+            <div class="input-group">
+                <label>Hardware MAC Address <span id="macValidMsg" style="font-weight:400;font-size:0.8rem;color:#E74C3C;"></span></label>
+                <input type="text" id="field_mac" placeholder="00:1A:2B:3C:4D:5E" class="input-uppercase" maxlength="17" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="input-group">
+                <label>Room Closet Identifier</label>
+                <input type="text" id="field_closet" placeholder="IDF-2B" class="input-uppercase" maxlength="40">
+            </div>
+        </div>
+
+        <div class="input-group" style="overflow: hidden;">
+            <label>Physical Switch Port Mapping</label>
+            <p style="font-size: 12px; color: #7f8c8d; margin-top: -3px; margin-bottom: 8px;">
+                *Type into a white field to enable its 'Active' toggle. (Swipe horizontally to see all ports)
+            </p>
+            
+            <div class="port-mapping-scroll-container">
+                <div class="port-mapping-container" id="portMappingVisualizer">
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="sticky-action-footer">
+    <div class="footer-left">
+        <div style="font-weight: bold; color: var(--text);">
+            Pins: <span id="auditPinCountDisplay" style="color: var(--primary); font-size: 1.2rem;">0</span>
+        </div>
+        <div class="footer-actions">
+            <button class="btn-secondary" id="saveSurveyBtn">💾 Save Survey</button>
+            <label class="btn-secondary" for="loadSurveyInput" style="display:inline-block; margin:0;">📂 Load Survey</label>
+            <input type="file" id="loadSurveyInput" accept=".json" style="display:none;">
+        </div>
+    </div>
+    <button class="btn-main-success" id="exportMasterBtn">⬇ Compile Site Audit + Map</button>
+</div>
+
+<div id="customContextMenu">
+    <div class="context-menu-item" id="deletePinBtn">🗑️ Delete Pin</div>
+</div>
+
+<script>
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FIREBASE CONFIG — paste your project values here
+    // Firebase Console → Project Settings → Your apps → Web app → Config
+    // ═══════════════════════════════════════════════════════════════════════════
+    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDFXVSmOk8umQii8W3X0quOaw3Bn8MmdVo",
+  authDomain: "networkmappingaudit.firebaseapp.com",
+  projectId: "networkmappingaudit",
+  storageBucket: "networkmappingaudit.firebasestorage.app",
+  messagingSenderId: "492192896097",
+  appId: "1:492192896097:web:2f20106e90968513534620",
+  measurementId: "G-24X5MDMQR0"
+};
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    const FB_READY = FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
+    let db = null, fbStorage = null, fbAuth = null, currentUser = null;
+
+    if (FB_READY) {
+        firebase.initializeApp(FIREBASE_CONFIG);
+        fbAuth    = firebase.auth();
+        db        = firebase.firestore();
+        fbStorage = firebase.storage();
+
+        fbAuth.onAuthStateChanged(user => {
+            currentUser = user;
+            if (user) {
+                document.getElementById('loginOverlay').style.display   = 'none';
+                document.getElementById('userEmail').textContent        = user.email;
+                document.getElementById('userInfoBar').style.display    = 'flex';
+                loadCloudHistory();
+            } else {
+                document.getElementById('loginOverlay').style.display   = 'flex';
+                document.getElementById('userInfoBar').style.display    = 'none';
+            }
+        });
+
+        document.getElementById('googleSignInBtn').addEventListener('click', () => {
+            document.getElementById('loginError').textContent = '';
+            fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider())
+                .catch(err => { document.getElementById('loginError').textContent = err.message; });
+        });
+
+        document.getElementById('signOutBtn').addEventListener('click', () => {
+            if (confirm('Sign out of PALTECH Audit Tool?')) fbAuth.signOut();
+        });
+    } else {
+        // Not configured yet — show offline bypass
+        document.getElementById('fbNotConfigured').style.display = 'block';
+        document.getElementById('googleSignInBtn').style.display = 'none';
+        document.getElementById('skipLoginBtn').addEventListener('click', e => {
+            e.preventDefault();
+            document.getElementById('loginOverlay').style.display = 'none';
+            renderLocalHistory();
+        });
+    }
+
+    let surveyPins = [];
+    let activePinIdx = null;
+    let runningCounter = 0;
+    let dynamicFields = {};
+
+    // Drag & Menu State
+    let isDragging = false;
+    let dragPinElement = null;
+    let dragPinId = null;
+    let targetPinForMenu = null;
+    let longPressTimer;
+
+    const contextMenu = document.getElementById('customContextMenu');
+
+    document.addEventListener('click', () => { contextMenu.style.display = 'none'; });
+    document.addEventListener('touchstart', () => { contextMenu.style.display = 'none'; });
+
+    document.getElementById('deletePinBtn').addEventListener('click', function(e) {
+        e.stopPropagation();
+        contextMenu.style.display = 'none';
+        if (targetPinForMenu !== null) triggerDeletePin(targetPinForMenu);
+    });
+
+    // --- MAC ADDRESS HELPERS ---
+    function formatMac(raw) {
+        const hex = raw.replace(/[^0-9A-Fa-f]/g, '').toUpperCase().substring(0, 12);
+        return hex.match(/.{1,2}/g)?.join(':') || hex;
+    }
+
+    function isValidMac(val) {
+        return /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(val.toUpperCase());
+    }
+
+    function validateMacField() {
+        const field = document.getElementById('field_mac');
+        const msg   = document.getElementById('macValidMsg');
+        const val   = field.value;
+        if (!val) {
+            field.classList.remove('mac-valid', 'mac-invalid');
+            msg.textContent = '';
+            return;
+        }
+        if (isValidMac(val)) {
+            field.classList.add('mac-valid');
+            field.classList.remove('mac-invalid');
+            msg.textContent = '✓ Valid';
+            msg.style.color = '#27AE60';
+        } else {
+            field.classList.add('mac-invalid');
+            field.classList.remove('mac-valid');
+            msg.textContent = '✗ Invalid format';
+            msg.style.color = '#E74C3C';
+        }
+    }
+
+    // --- GPS LOCATION ---
+    document.getElementById('gpsBtn').addEventListener('click', function() {
+        if (!navigator.geolocation) { alert('Geolocation is not supported by this browser.'); return; }
+        const btn = this;
+        btn.disabled = true;
+        btn.textContent = '⏳';
+        navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+                const { latitude: lat, longitude: lon } = pos.coords;
+                const res = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`
+                );
+                if (!res.ok) throw new Error('API error');
+                const data = await res.json();
+                // Build a clean address string from structured parts
+                const a = data.address || {};
+                const parts = [
+                    a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road,
+                    a.city || a.town || a.village,
+                    a.state,
+                    a.postcode,
+                    a.country_code ? a.country_code.toUpperCase() : null
+                ].filter(Boolean);
+                document.getElementById('siteAddress').value = parts.length ? parts.join(', ') : data.display_name;
+
+                // Auto-fill facility name if empty
+                const locField = document.getElementById('locName');
+                if (!locField.value) {
+                    locField.value = data.name || a.building || a.amenity || a.leisure ||
+                                     a.office || a.tourism || a.shop || '';
+                }
+            } catch(err) {
+                alert('Could not retrieve address. Check network connection and try again.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📍';
+            }
+        }, (err) => {
+            alert('Location access denied or unavailable. Please allow location permission in your browser.');
+            btn.disabled = false;
+            btn.textContent = '📍';
+        }, { timeout: 10000 });
+    });
+
+    // --- FETCH LOCATION NAME FROM ADDRESS ---
+    document.getElementById('fetchLocBtn').addEventListener('click', async function() {
+        const addrVal = document.getElementById('siteAddress').value.trim();
+        if (!addrVal) { alert('Enter a Site Address first, then click this button.'); return; }
+        const btn = this;
+        btn.disabled = true;
+        btn.textContent = '⏳';
+        try {
+            const res = await fetch(
+                `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addrVal)}&format=json&limit=1&addressdetails=1`
+            );
+            if (!res.ok) throw new Error('API error');
+            const data = await res.json();
+            if (data && data[0]) {
+                const a = data[0].address || {};
+                // `name` is the OSM place name (e.g. "Apple Park Visitor Center")
+                // fall back through address fields, then to the first segment of the address text
+                const name = data[0].name ||
+                             a.building || a.amenity || a.leisure || a.office ||
+                             a.tourism || a.shop || a.neighbourhood ||
+                             addrVal.split(',')[0].trim();
+                document.getElementById('locName').value = name;
+            } else {
+                // Local fallback: use the first comma-delimited segment of the typed address
+                const fallback = addrVal.split(',')[0].trim();
+                document.getElementById('locName').value = fallback;
+                alert('No exact match found online. Used first part of the address as the name — edit as needed.');
+            }
+        } catch(err) {
+            // Offline / network error — still do the local fallback
+            const fallback = addrVal.split(',')[0].trim();
+            document.getElementById('locName').value = fallback;
+            alert('Network request failed. Used first part of the address as the name — edit as needed.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '⟳';
+        }
+    });
+
+    // --- PORT VISUALIZER ---
+    function renderPortVisualizer() {
+        const container = document.getElementById('portMappingVisualizer');
+        let html = '';
+        html += '<div class="switch-block">';
+        html += '<div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<div class="toggle-container" title="Mark Port ${p} Active"><input type="checkbox" disabled class="port-toggle" data-port="${p}"></div>`; }
+        html += '</div><div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<input type="text" class="pp-input" data-port="${p}" placeholder="PP">`; }
+        html += '</div><div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<div class="port-label">${p}</div>`; }
+        html += '</div><div class="row-spacer"></div><div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=i*2; html += `<div class="port-label">${p}</div>`; }
+        html += '</div><div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=i*2; html += `<input type="text" class="pp-input" data-port="${p}" placeholder="PP">`; }
+        html += '</div><div class="port-row main-grid">';
+        for(let i=1; i<=24; i++) { let p=i*2; html += `<div class="toggle-container" title="Mark Port ${p} Active"><input type="checkbox" disabled class="port-toggle" data-port="${p}"></div>`; }
+        html += '</div></div>';
+        html += '<div class="bottom-section"><div class="uplink-block"><div class="port-row uplink-grid">';
+        for(let i=1; i<=4; i++) html += `<div class="toggle-container"><input type="checkbox" disabled class="port-toggle" data-port="U${i}"></div>`;
+        html += '</div><div class="port-row uplink-grid">';
+        for(let i=1; i<=4; i++) html += `<input type="text" class="pp-input" data-port="U${i}" placeholder="Uplink ${i}">`;
+        html += '</div><div class="port-row uplink-grid">';
+        for(let i=1; i<=4; i++) html += `<div class="port-label" style="background:#8E44AD;">SFP ${i}</div>`;
+        html += '</div></div>';
+        html += '<div class="notes-block"><label style="color:var(--primary); font-weight:bold;">Location Mappings general Notes</label>';
+        html += '<textarea id="field_notes_dynamic" placeholder="Access notes, power details, MDF paths..."></textarea></div></div>';
+        container.innerHTML = html;
+        document.querySelectorAll('.pp-input').forEach(inp => inp.addEventListener('input', updatePortData));
+        document.querySelectorAll('.port-toggle').forEach(cb => cb.addEventListener('change', updatePortData));
+    }
+
+    renderPortVisualizer();
+
+    dynamicFields = {
+        label: document.getElementById('field_label'),
+        mac:   document.getElementById('field_mac'),
+        closet: document.getElementById('field_closet'),
+        notes: document.getElementById('field_notes_dynamic')
+    };
+
+    // Uppercase + MAC formatting on input
+    dynamicFields.label.addEventListener('input', function() {
+        const pos = this.selectionStart;
+        this.value = this.value.toUpperCase();
+        this.setSelectionRange(pos, pos);
+        if (activePinIdx !== null) surveyPins[activePinIdx].label = this.value;
+    });
+
+    dynamicFields.closet.addEventListener('input', function() {
+        const pos = this.selectionStart;
+        this.value = this.value.toUpperCase();
+        this.setSelectionRange(pos, pos);
+        if (activePinIdx !== null) surveyPins[activePinIdx].closet = this.value;
+    });
+
+    dynamicFields.mac.addEventListener('input', function() {
+        const pos = this.selectionStart;
+        const raw = this.value;
+        const formatted = formatMac(raw);
+        this.value = formatted;
+        // Adjust cursor: account for inserted colons
+        const newPos = Math.min(pos + (formatted.length - raw.length), formatted.length);
+        this.setSelectionRange(newPos, newPos);
+        if (activePinIdx !== null) surveyPins[activePinIdx].mac = this.value;
+        validateMacField();
+    });
+
+    dynamicFields.mac.addEventListener('blur', validateMacField);
+
+    dynamicFields.notes.addEventListener('input', function() {
+        if (activePinIdx !== null) surveyPins[activePinIdx].notes = this.value;
+    });
+
+    // --- BLUEPRINT UPLOAD ---
+    document.getElementById('blueprintUpload').addEventListener('change', function(e) {
+        if (e.target.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                document.getElementById('floorPlanImg').src = ev.target.result;
+                document.getElementById('floorPlanImg').style.display = 'block';
+                document.getElementById('placeholderMapText').style.display = 'none';
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        }
+    });
+
+    const mapWrapper = document.getElementById('mapWrapper');
+    const floorPlanImg = document.getElementById('floorPlanImg');
+
+    floorPlanImg.addEventListener('click', function(e) {
+        if (isDragging) return;
+        const rect = this.getBoundingClientRect();
+        const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+        const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+        runningCounter = surveyPins.length + 1;
+        const newPinObj = {
+            id: runningCounter, x: xPercent, y: yPercent,
+            label: `SW-${runningCounter}`, mac: '', closet: '', notes: '',
+            portData: {}
+        };
+        surveyPins.push(newPinObj);
+        createPinElement(newPinObj);
+        setActiveAuditPin(surveyPins.length - 1);
+        updatePinCount();
+    });
+
+    function createPinElement(pinObj) {
+        const pinEl = document.createElement('div');
+        pinEl.className = 'pin';
+        pinEl.id = `audit_pin_${pinObj.id}`;
+        pinEl.dataset.pinId = pinObj.id;
+        pinEl.style.left = `${pinObj.x}%`;
+        pinEl.style.top  = `${pinObj.y}%`;
+        pinEl.innerHTML = `<svg viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">
+            <path class="pin-body" d="M13 1C7.48 1 3 5.48 3 11c0 7.75 10 22 10 22s10-14.25 10-22C23 5.48 18.52 1 13 1z" stroke="white" stroke-width="1.5"/>
+            <circle cx="13" cy="11" r="5" fill="rgba(255,255,255,0.25)"/>
+            <text class="pin-num" x="13" y="11.5" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="9" font-weight="bold" font-family="Arial,sans-serif">${pinObj.id}</text>
+        </svg>`;
+        pinEl.addEventListener('mousedown', dragStart);
+        pinEl.addEventListener('touchstart', dragStart, {passive: false});
+        pinEl.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            targetPinForMenu = parseInt(this.dataset.pinId);
+            contextMenu.style.display = 'block';
+            contextMenu.style.left = e.pageX + 'px';
+            contextMenu.style.top = e.pageY + 'px';
+        });
+        pinEl.onclick = function(ev) {
+            ev.stopPropagation();
+            setActiveAuditPin(surveyPins.findIndex(p => p.id === parseInt(this.dataset.pinId)));
+        };
+        mapWrapper.appendChild(pinEl);
+    }
+
+    // --- DRAG & LONG PRESS ---
+    function dragStart(e) {
+        if (e.type === "touchstart") e.preventDefault();
+        if (e.button === 2) return;
+        // Walk up to the .pin container in case the SVG child was the event target
+        dragPinElement = e.target.closest('.pin') || e.target;
+        dragPinId = parseInt(dragPinElement.dataset.pinId);
+        isDragging = false;
+        if (e.type === "touchstart") {
+            longPressTimer = setTimeout(() => {
+                targetPinForMenu = dragPinId;
+                contextMenu.style.display = 'block';
+                contextMenu.style.left = e.touches[0].pageX + 'px';
+                contextMenu.style.top = e.touches[0].pageY + 'px';
+            }, 700);
+        }
+        const idx = surveyPins.findIndex(p => p.id === dragPinId);
+        if (idx !== -1) setActiveAuditPin(idx);
+        document.addEventListener('mousemove', dragging);
+        document.addEventListener('touchmove', dragging, {passive: false});
+        document.addEventListener('mouseup', dragEnd);
+        document.addEventListener('touchend', dragEnd);
+    }
+
+    function dragging(e) {
+        isDragging = true;
+        clearTimeout(longPressTimer);
+        const rect = floorPlanImg.getBoundingClientRect();
+        let clientX = e.clientX || (e.touches && e.touches[0].clientX);
+        let clientY = e.clientY || (e.touches && e.touches[0].clientY);
+        let x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+        let y = Math.max(0, Math.min(clientY - rect.top, rect.height));
+        dragPinElement.style.left = `${(x / rect.width) * 100}%`;
+        dragPinElement.style.top  = `${(y / rect.height) * 100}%`;
+    }
+
+    function dragEnd(e) {
+        clearTimeout(longPressTimer);
+        if (isDragging && dragPinElement && dragPinId) {
+            const idx = surveyPins.findIndex(p => p.id === dragPinId);
+            if (idx !== -1) {
+                surveyPins[idx].x = parseFloat(dragPinElement.style.left);
+                surveyPins[idx].y = parseFloat(dragPinElement.style.top);
+            }
+        }
+        document.removeEventListener('mousemove', dragging);
+        document.removeEventListener('touchmove', dragging);
+        document.removeEventListener('mouseup', dragEnd);
+        document.removeEventListener('touchend', dragEnd);
+        setTimeout(() => { isDragging = false; dragPinElement = null; dragPinId = null; }, 50);
+    }
+
+    // --- DELETE & RENUMBER ---
+    function triggerDeletePin(pinId) {
+        if (!confirm(`WARNING: Are you sure you want to delete Pin #${pinId}?\n\nAll port mapping data for this switch will be PERMANENTLY LOST.`)) return;
+        const idx = surveyPins.findIndex(p => p.id === pinId);
+        if (idx === -1) return;
+        surveyPins.splice(idx, 1);
+        const pinEl = document.getElementById(`audit_pin_${pinId}`);
+        if (pinEl) pinEl.remove();
+        surveyPins.forEach((pin, index) => {
+            const newId = index + 1;
+            if (pin.id !== newId) {
+                const el = document.getElementById(`audit_pin_${pin.id}`);
+                pin.id = newId;
+                if (el) {
+                    el.id = `audit_pin_${newId}`;
+                    el.dataset.pinId = newId;
+                    const txt = el.querySelector('.pin-num');
+                    if (txt) txt.textContent = newId;
+                }
+            }
+        });
+        runningCounter = surveyPins.length;
+        updatePinCount();
+        if (activePinIdx === idx || surveyPins.length === 0) {
+            document.getElementById('activePinDetailsCard').style.display = 'none';
+            activePinIdx = null;
+        } else {
+            const activeEl = document.querySelector('.pin.active');
+            if (activeEl) {
+                const activeId = parseInt(activeEl.dataset.pinId);
+                activePinIdx = surveyPins.findIndex(p => p.id === activeId);
+                document.getElementById('detailsPinNum').textContent = `#${activeId}`;
+            }
+        }
+    }
+
+    function updatePinCount() {
+        document.getElementById('auditPinCountDisplay').innerText = surveyPins.length;
+    }
+
+    document.getElementById('deletePinCardBtn').addEventListener('click', () => {
+        if (activePinIdx !== null) triggerDeletePin(surveyPins[activePinIdx].id);
+    });
+
+    function setActiveAuditPin(index) {
+        activePinIdx = index;
+        const data = surveyPins[index];
+        document.querySelectorAll('.pin').forEach(p => p.classList.remove('active'));
+        document.getElementById(`audit_pin_${data.id}`).classList.add('active');
+        document.getElementById('detailsPinNum').textContent = `#${data.id}`;
+        Object.keys(dynamicFields).forEach(key => dynamicFields[key].value = data[key] || '');
+        validateMacField();
+        document.querySelectorAll('.pp-input').forEach(sq => {
+            const port = sq.dataset.port;
+            const textVal = (data.portData[port] && data.portData[port].text) ? data.portData[port].text : '';
+            sq.value = textVal;
+            const checkbox = document.querySelector(`.port-toggle[data-port="${port}"]`);
+            if (checkbox) {
+                checkbox.disabled = (textVal.trim() === '');
+                checkbox.checked = !!(data.portData[port] && data.portData[port].active);
+            }
+        });
+        document.getElementById('activePinDetailsCard').style.display = 'block';
+    }
+
+    function updatePortData(e) {
+        if (activePinIdx === null) return;
+        const port = e.target.dataset.port;
+        if (!surveyPins[activePinIdx].portData[port])
+            surveyPins[activePinIdx].portData[port] = { text: '', active: false };
+        if (e.target.type === 'checkbox') {
+            surveyPins[activePinIdx].portData[port].active = e.target.checked;
+        } else {
+            const textVal = e.target.value;
+            surveyPins[activePinIdx].portData[port].text = textVal;
+            const checkbox = document.querySelector(`.port-toggle[data-port="${port}"]`);
+            if (checkbox) {
+                if (textVal.trim() !== '') {
+                    checkbox.disabled = false;
+                } else {
+                    checkbox.disabled = true;
+                    checkbox.checked = false;
+                    surveyPins[activePinIdx].portData[port].active = false;
+                }
+            }
+        }
+    }
+
+    // --- FLOOR PLAN IMAGE EXPORT — native Canvas, 2× resolution, teardrop pins ---
+    function exportFloorPlanJpg(cleanName) {
+        const img = document.getElementById('floorPlanImg');
+        if (!img.src || img.style.display === 'none') return;
+
+        const W = img.naturalWidth  || img.offsetWidth;
+        const H = img.naturalHeight || img.offsetHeight;
+        if (!W || !H) return;
+
+        const SCALE  = 2;                     // export at 2× natural resolution
+        const canvas = document.createElement('canvas');
+        canvas.width  = W * SCALE;
+        canvas.height = H * SCALE;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(SCALE, SCALE);
+
+        ctx.drawImage(img, 0, 0, W, H);
+
+        // pin size relative to image width, capped for very large/small images
+        const pinR  = Math.max(12, Math.min(Math.round(W * 0.018), 32)); // circle radius
+        const pinH  = pinR * 2.6;  // total pin height (circle + point)
+
+        surveyPins.forEach(pin => {
+            // x,y = the TIP of the pin (matches the % position on screen)
+            const x  = (pin.x / 100) * W;
+            const y  = (pin.y / 100) * H;
+            const cx = x;
+            const cy = y - pinH + pinR; // center of the circle part
+
+            ctx.shadowColor   = 'rgba(0,0,0,0.4)';
+            ctx.shadowBlur    = 6;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 2;
+
+            // Teardrop body: arc of the circle + two lines meeting at the tip
+            const ang = Math.asin(0); // angle offset for smooth join (~0 = full semicircle sides)
+            ctx.beginPath();
+            ctx.arc(cx, cy, pinR, Math.PI * 0.28, Math.PI * 0.72, true); // upper arc (inverted)
+            ctx.lineTo(x, y);           // right side to tip
+            ctx.closePath();
+
+            // Simpler & more reliable: just draw a circle + triangle
+            ctx.beginPath();
+            ctx.arc(cx, cy, pinR, 0, Math.PI * 2);
+            ctx.fillStyle = '#E74C3C';
+            ctx.fill();
+
+            // Triangle point below circle
+            ctx.shadowColor = 'transparent';
+            ctx.beginPath();
+            ctx.moveTo(cx - pinR * 0.55, cy + pinR * 0.7);
+            ctx.lineTo(cx + pinR * 0.55, cy + pinR * 0.7);
+            ctx.lineTo(cx, y);
+            ctx.closePath();
+            ctx.fillStyle = '#E74C3C';
+            ctx.fill();
+
+            // White outline on circle
+            ctx.beginPath();
+            ctx.arc(cx, cy, pinR, 0, Math.PI * 2);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth   = Math.max(1.5, pinR * 0.15);
+            ctx.stroke();
+
+            // Pin number
+            const fs = Math.max(10, Math.round(pinR * 0.95));
+            ctx.fillStyle    = 'white';
+            ctx.font         = `bold ${fs}px Arial, sans-serif`;
+            ctx.textAlign    = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(pin.id), cx, cy);
+
+            // Label badge below tip
+            if (pin.label) {
+                const lfs = Math.max(9, Math.round(pinR * 0.7));
+                ctx.font  = `bold ${lfs}px Arial, sans-serif`;
+                const tw  = ctx.measureText(pin.label).width;
+                const pw  = tw + pinR * 0.9;
+                const ph  = lfs + pinR * 0.55;
+                const bx  = cx - pw / 2;
+                const by  = y + 5;
+                const br  = 4;
+
+                ctx.fillStyle = 'rgba(0,45,90,0.88)';
+                ctx.beginPath();
+                ctx.moveTo(bx + br, by);
+                ctx.lineTo(bx + pw - br, by);
+                ctx.quadraticCurveTo(bx + pw, by,      bx + pw, by + br);
+                ctx.lineTo(bx + pw, by + ph - br);
+                ctx.quadraticCurveTo(bx + pw, by + ph, bx + pw - br, by + ph);
+                ctx.lineTo(bx + br, by + ph);
+                ctx.quadraticCurveTo(bx, by + ph,      bx, by + ph - br);
+                ctx.lineTo(bx, by + br);
+                ctx.quadraticCurveTo(bx, by,            bx + br, by);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle    = 'white';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(pin.label, cx, by + ph / 2);
+            }
+        });
+
+        const link = document.createElement('a');
+        link.download = `Paltech_FloorPlan_${cleanName || 'map'}.jpg`;
+        link.href = canvas.toDataURL('image/jpeg', 0.95);
+        link.click();
+    }
+
+    // ─── HISTORY TOGGLE ──────────────────────────────────────────────────────
+    document.getElementById('historyToggle').addEventListener('click', () => {
+        const listEl = document.getElementById('historyList');
+        const arrow  = document.getElementById('historyArrow');
+        const open   = listEl.style.display !== 'none';
+        listEl.style.display = open ? 'none' : 'block';
+        arrow.textContent    = open ? '▼' : '▲';
+        if (!open) { FB_READY && currentUser ? loadCloudHistory() : renderLocalHistory(); }
+    });
+
+    document.getElementById('searchBtn').addEventListener('click', () => {
+        FB_READY && currentUser ? loadCloudHistory() : renderLocalHistory();
+    });
+    document.getElementById('searchLocation').addEventListener('keyup', e => {
+        if (e.key === 'Enter') { FB_READY && currentUser ? loadCloudHistory() : renderLocalHistory(); }
+    });
+
+    // ─── SHARED HISTORY RENDERER ──────────────────────────────────────────────
+    function renderHistoryItems(surveys, onLoad, onDelete) {
+        const list  = document.getElementById('historyList');
+        const empty = document.getElementById('historyEmpty');
+        Array.from(list.querySelectorAll('.history-item')).forEach(el => el.remove());
+        if (!surveys.length) { empty.style.display = ''; return; }
+        empty.style.display = 'none';
+        surveys.forEach(s => {
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `
+                <div class="history-item-meta">
+                    <strong>${s.locName || 'Unnamed Survey'}</strong>
+                    <span>${s.savedAt || ''} &nbsp;·&nbsp; ${s.pinCount || 0} pin${s.pinCount !== 1 ? 's' : ''} &nbsp;·&nbsp; ${s.techName || ''}</span>
+                    <span style="font-size:0.75rem;color:#aaa;">${s.siteAddress || ''}</span>
+                </div>
+                <button class="btn-history-load">Load</button>
+                <button class="btn-history-del">🗑</button>`;
+            div.querySelector('.btn-history-load').addEventListener('click', () => onLoad(s));
+            div.querySelector('.btn-history-del').addEventListener('click',  () => onDelete(s));
+            list.appendChild(div);
+        });
+    }
+
+    // ─── LOCAL (OFFLINE) HISTORY ──────────────────────────────────────────────
+    const LS_KEY = 'paltech_survey_history';
+    function getLocalHistory() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch(e) { return []; } }
+    function setLocalHistory(e) { try { localStorage.setItem(LS_KEY, JSON.stringify(e)); } catch(e) {} }
+
+    function renderLocalHistory() {
+        const loc  = (document.getElementById('searchLocation').value || '').toLowerCase();
+        let entries = getLocalHistory();
+        if (loc) entries = entries.filter(e =>
+            (e.locName || '').toLowerCase().includes(loc) ||
+            (e.siteAddress || '').toLowerCase().includes(loc));
+        renderHistoryItems(entries,
+            s => loadLocalJson(s.id),
+            s => { setLocalHistory(getLocalHistory().filter(e => e.id !== s.id)); renderLocalHistory(); }
+        );
+    }
+
+    function loadLocalJson(id) {
+        alert('Local history only stores metadata.\nUse 📂 Load Survey to re-open the .json file you downloaded for this session.');
+    }
+
+    // ─── CLOUD (FIREBASE) HISTORY ─────────────────────────────────────────────
+    async function loadCloudHistory() {
+        if (!currentUser || !db) return;
+        const loc      = (document.getElementById('searchLocation').value || '').toLowerCase().trim();
+        const dateFrom = document.getElementById('searchDateFrom').value;
+        const dateTo   = document.getElementById('searchDateTo').value;
+
+        const empty = document.getElementById('historyEmpty');
+        empty.textContent = '⏳ Loading…';
+        empty.style.display = '';
+        Array.from(document.querySelectorAll('#historyList .history-item')).forEach(el => el.remove());
+
+        try {
+            let q = db.collection('surveys')
+                      .where('userId', '==', currentUser.uid)
+                      .orderBy('savedAt', 'desc')
+                      .limit(100);
+            if (dateFrom) q = q.where('savedAt', '>=', new Date(dateFrom));
+            if (dateTo)   q = q.where('savedAt', '<=', new Date(dateTo + 'T23:59:59'));
+
+            const snap = await q.get();
+            let surveys = snap.docs.map(d => ({ docId: d.id, ...d.data(),
+                savedAt: d.data().savedAt?.toDate ? d.data().savedAt.toDate().toLocaleString() : '' }));
+
+            if (loc) surveys = surveys.filter(s =>
+                (s.locName || '').toLowerCase().includes(loc) ||
+                (s.siteAddress || '').toLowerCase().includes(loc));
+
+            empty.textContent = 'No surveys found. Try adjusting your search.';
+            renderHistoryItems(surveys,
+                s => loadCloudSurvey(s.docId),
+                s => deleteCloudSurvey(s.docId)
+            );
+        } catch(err) {
+            if (err.code === 'failed-precondition') {
+                empty.textContent = 'Index building… check the browser console for a Firestore link to create the required index (takes ~1 min), then refresh.';
+                empty.style.display = '';
+                console.error('Firestore index needed:', err);
+            } else {
+                empty.textContent = 'Could not load history: ' + err.message;
+                empty.style.display = '';
+            }
+        }
+    }
+
+    async function loadCloudSurvey(docId) {
+        try {
+            const snap = await db.collection('surveys').doc(docId).get();
+            if (!snap.exists) { alert('Survey not found.'); return; }
+            const data = snap.data();
+            data.savedAt = data.savedAt?.toDate ? data.savedAt.toDate().toLocaleString() : '';
+
+            // Convert Storage URL → data URL so canvas export works without CORS issues
+            if (data.floorPlanUrl) {
+                try {
+                    const res  = await fetch(data.floorPlanUrl);
+                    const blob = await res.blob();
+                    data.floorPlan = await new Promise(res => {
+                        const r = new FileReader();
+                        r.onload = e => res(e.target.result);
+                        r.readAsDataURL(blob);
+                    });
+                } catch(e) {
+                    data.floorPlan = data.floorPlanUrl; // fallback — display only
+                }
+            }
+            applyLoadedSurvey(data);
+        } catch(err) { alert('Load failed: ' + err.message); }
+    }
+
+    async function deleteCloudSurvey(docId) {
+        if (!confirm('Permanently delete this survey from the cloud?')) return;
+        try {
+            try { await fbStorage.ref(`surveys/${currentUser.uid}/${docId}/floorplan.jpg`).delete(); } catch(e) {}
+            await db.collection('surveys').doc(docId).delete();
+            loadCloudHistory();
+        } catch(err) { alert('Delete failed: ' + err.message); }
+    }
+
+    // ─── SAVE SURVEY ──────────────────────────────────────────────────────────
+    document.getElementById('saveSurveyBtn').addEventListener('click', async () => {
+        if (FB_READY && currentUser) {
+            await saveToCloud();
+        } else {
+            saveLocalDownload();
+        }
+    });
+
+    async function saveToCloud() {
+        const locName  = document.getElementById('locName').value     || 'Survey';
+        const techName = document.getElementById('techName').value    || '';
+        const siteAddr = document.getElementById('siteAddress').value || '';
+        const imgEl    = document.getElementById('floorPlanImg');
+        const hasImage = imgEl.src && imgEl.style.display !== 'none';
+        const btn      = document.getElementById('saveSurveyBtn');
+
+        btn.textContent = '⏳ Saving…'; btn.disabled = true;
+        try {
+            const ref       = db.collection('surveys').doc();
+            const surveyId  = ref.id;
+            let floorPlanUrl = null;
+
+            if (hasImage) {
+                const compressed = await compressImage(imgEl.src);
+                const sRef = fbStorage.ref(`surveys/${currentUser.uid}/${surveyId}/floorplan.jpg`);
+                await sRef.putString(compressed, 'data_url', { contentType: 'image/jpeg' });
+                floorPlanUrl = await sRef.getDownloadURL();
+            }
+
+            await ref.set({
+                userId: currentUser.uid, userEmail: currentUser.email,
+                locName, techName, siteAddress: siteAddr,
+                savedAt:   firebase.firestore.FieldValue.serverTimestamp(),
+                pinCount:  surveyPins.length,
+                pins:      surveyPins,
+                floorPlanUrl
+            });
+
+            btn.textContent = '✓ Saved to Cloud';
+            setTimeout(() => { btn.textContent = '💾 Save Survey'; btn.disabled = false; }, 2500);
+            loadCloudHistory();
+        } catch(err) {
+            alert('Cloud save failed: ' + err.message + '\n\nFalling back to local download.');
+            saveLocalDownload();
+            btn.textContent = '💾 Save Survey'; btn.disabled = false;
+        }
+    }
+
+    function saveLocalDownload() {
+        const locName  = document.getElementById('locName').value     || 'Survey';
+        const techName = document.getElementById('techName').value    || '';
+        const siteAddr = document.getElementById('siteAddress').value || '';
+        const imgEl    = document.getElementById('floorPlanImg');
+        const hasImage = imgEl.src && imgEl.style.display !== 'none';
+        const savedAt  = new Date().toLocaleString();
+        const id       = Date.now().toString();
+
+        const payload  = { version: 2, id, savedAt, techName, locName,
+            siteAddress: siteAddr, pins: surveyPins,
+            floorPlan: hasImage ? imgEl.src : null };
+
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.download = `PaltechSurvey_${locName.replace(/[^a-z0-9]/gi,'_')}_${new Date().toISOString().slice(0,10)}.json`;
+        a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href);
+
+        // Register in localStorage (metadata only)
+        const entries = getLocalHistory().filter(e => e.id !== id);
+        entries.unshift({ id, savedAt, techName, locName, siteAddress: siteAddr, pinCount: surveyPins.length });
+        setLocalHistory(entries.slice(0, 30));
+    }
+
+    // ─── LOAD FROM JSON FILE (backup / offline) ───────────────────────────────
+    document.getElementById('loadSurveyInput').addEventListener('change', function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try { applyLoadedSurvey(JSON.parse(ev.target.result)); }
+            catch(err) { alert('Invalid survey file.'); }
+        };
+        reader.readAsText(file);
+        this.value = '';
+    });
+
+    // ─── APPLY LOADED SURVEY (shared by cloud + file load) ───────────────────
+    function applyLoadedSurvey(data) {
+        if (!confirm(`Load survey "${data.locName || 'Unknown'}" (${data.savedAt || 'unknown date'})?\n\nThis replaces your current session.`)) return;
+
+        surveyPins.forEach(p => { const el = document.getElementById(`audit_pin_${p.id}`); if (el) el.remove(); });
+
+        document.getElementById('techName').value    = data.techName    || '';
+        document.getElementById('locName').value     = data.locName     || '';
+        document.getElementById('siteAddress').value = data.siteAddress || '';
+
+        const img = document.getElementById('floorPlanImg');
+        if (data.floorPlan) {
+            img.src = data.floorPlan;
+            img.style.display = 'block';
+            document.getElementById('placeholderMapText').style.display = 'none';
+        } else {
+            img.src = ''; img.style.display = 'none';
+            document.getElementById('placeholderMapText').style.display = '';
+        }
+
+        surveyPins = (data.pins || []).map(p => ({ ...p, portData: p.portData || {} }));
+        runningCounter = surveyPins.length;
+        surveyPins.forEach(p => createPinElement(p));
+        updatePinCount();
+        document.getElementById('activePinDetailsCard').style.display = 'none';
+        activePinIdx = null;
+    }
+
+    // ─── IMAGE COMPRESSION (before upload) ───────────────────────────────────
+    function compressImage(src) {
+        return new Promise(resolve => {
+            const i = new Image();
+            i.onload = () => {
+                const MAX = 2000;
+                let w = i.naturalWidth, h = i.naturalHeight;
+                if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+                const c = document.createElement('canvas');
+                c.width = w; c.height = h;
+                c.getContext('2d').drawImage(i, 0, 0, w, h);
+                resolve(c.toDataURL('image/jpeg', 0.82));
+            };
+            i.src = src;
+        });
+    }
+
+    // Populate history on load
+    if (!FB_READY) renderLocalHistory();
+
+    // --- COMPILE & EXPORT ---
+    document.getElementById('exportMasterBtn').addEventListener('click', () => {
+        const auditLoc  = document.getElementById('locName').value    || "Not Specified";
+        const techEng   = document.getElementById('techName').value   || "Dean Sharawi";
+        const siteAddr  = document.getElementById('siteAddress').value || "Not Specified";
+        const auditDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+        const cleanName = auditLoc.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+        // ── Sheet 1: Audit Summary ──────────────────────────────────────────
+        const summaryData = [
+            ["PALTECH LLC — NETWORK INFRASTRUCTURE AUDIT REPORT"],
+            [],
+            ["AUDIT METADATA",     "",            "",        ""                    ],
+            ["Field",              "Value",        "",        ""                    ],
+            ["Audit Date",         auditDate,      "",        ""                    ],
+            ["Audit Engineer",     techEng,        "",        ""                    ],
+            ["Location / Facility",auditLoc,       "",        ""                    ],
+            ["Site Address",       siteAddr,       "",        ""                    ],
+            ["Total Devices (Pins)",surveyPins.length, "",    ""                    ],
+            [],
+            // ── Column headers ──
+            [
+                "Pin #",
+                "Device Label / ID",
+                "Hardware MAC Address",
+                "IDF / Room Closet",
+                "Active Port Count",
+                "Active Ports",
+                "Patch Panel Mappings",
+                "SFP / Uplink Mappings",
+                "Notes"
+            ]
+        ];
+
+        surveyPins.forEach(p => {
+            const activeList  = [];
+            const ppMappings  = [];
+            const sfpMappings = [];
+
+            for (let i = 1; i <= 48; i++) {
+                const pd = p.portData[i];
+                if (pd) {
+                    if (pd.active) activeList.push(`P${String(i).padStart(2,'0')}`);
+                    if (pd.text)   ppMappings.push(`P${String(i).padStart(2,'0')}: ${pd.text}`);
+                }
+            }
+            for (let i = 1; i <= 4; i++) {
+                const pd = p.portData[`U${i}`];
+                if (pd) {
+                    if (pd.active) activeList.push(`SFP${i}`);
+                    if (pd.text)   sfpMappings.push(`SFP${i}: ${pd.text}`);
+                }
+            }
+
+            summaryData.push([
+                p.id,
+                p.label.toUpperCase(),
+                p.mac.toUpperCase(),
+                p.closet.toUpperCase(),
+                activeList.length,
+                activeList.join(', '),
+                ppMappings.join('\n'),
+                sfpMappings.join('\n'),
+                p.notes
+            ]);
+        });
+
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        wsSummary['!cols'] = [
+            {wch:8},   // Pin #
+            {wch:20},  // Device Label
+            {wch:22},  // MAC
+            {wch:20},  // Closet
+            {wch:14},  // Active Count
+            {wch:30},  // Active Ports
+            {wch:45},  // PP Mappings
+            {wch:35},  // SFP Mappings
+            {wch:40}   // Notes
+        ];
+
+        // ── Sheet 2: Port Detail (one row per mapped port) ─────────────────
+        const portDetailData = [
+            ["PALTECH LLC — PORT DETAIL REPORT"],
+            [],
+            ["Pin #", "Device Label", "MAC Address", "IDF / Closet", "Port", "Port Type", "Patch Panel Destination", "Active"]
+        ];
+
+        surveyPins.forEach(p => {
+            for (let i = 1; i <= 48; i++) {
+                const pd = p.portData[i];
+                if (pd && pd.text) {
+                    portDetailData.push([
+                        p.id,
+                        p.label.toUpperCase(),
+                        p.mac.toUpperCase(),
+                        p.closet.toUpperCase(),
+                        `P${String(i).padStart(2,'0')}`,
+                        "Copper (RJ-45)",
+                        pd.text,
+                        pd.active ? "YES" : "NO"
+                    ]);
+                }
+            }
+            for (let i = 1; i <= 4; i++) {
+                const pd = p.portData[`U${i}`];
+                if (pd && pd.text) {
+                    portDetailData.push([
+                        p.id,
+                        p.label.toUpperCase(),
+                        p.mac.toUpperCase(),
+                        p.closet.toUpperCase(),
+                        `SFP${i}`,
+                        "SFP / Uplink",
+                        pd.text,
+                        pd.active ? "YES" : "NO"
+                    ]);
+                }
+            }
+        });
+
+        const wsPort = XLSX.utils.aoa_to_sheet(portDetailData);
+        wsPort['!cols'] = [{wch:8},{wch:20},{wch:22},{wch:20},{wch:10},{wch:16},{wch:35},{wch:10}];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, wsSummary, "Audit Summary");
+        XLSX.utils.book_append_sheet(wb, wsPort,    "Port Detail");
+        XLSX.writeFile(wb, `Paltech_Audit_${cleanName || 'export'}.xlsx`);
+
+        // Floor plan image
+        exportFloorPlanJpg(cleanName);
+    });
+</script>
+
+</body>
+</html>
