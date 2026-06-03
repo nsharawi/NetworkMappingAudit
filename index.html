@@ -425,12 +425,7 @@
 </div>
 
 <script>
-    // ═══════════════════════════════════════════════════════════════════════════
-    // FIREBASE CONFIG — paste your project values here
-    // Firebase Console → Project Settings → Your apps → Web app → Config
-    // ═══════════════════════════════════════════════════════════════════════════
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
+  const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDFXVSmOk8umQii8W3X0quOaw3Bn8MmdVo",
   authDomain: "networkmappingaudit.firebaseapp.com",
   projectId: "networkmappingaudit",
@@ -439,9 +434,8 @@ const firebaseConfig = {
   appId: "1:492192896097:web:2f20106e90968513534620",
   measurementId: "G-24X5MDMQR0"
 };
-    // ═══════════════════════════════════════════════════════════════════════════
 
-    const FB_READY = FIREBASE_CONFIG.apiKey !== "AIzaSyDFXVSmOk8umQii8W3X0quOaw3Bn8MmdVo";
+    const FB_READY = true;
     let db = null, fbStorage = null, fbAuth = null, currentUser = null;
 
     if (FB_READY) {
