@@ -179,6 +179,41 @@
             padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
         }
 
+        /* Address autocomplete */
+        .autocomplete-wrapper { position: relative; flex: 1; }
+        .autocomplete-dropdown {
+            position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+            background: white; border: 1px solid #B3C8D9;
+            border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+            z-index: 600; max-height: 300px; overflow-y: auto; display: none;
+        }
+        .ac-item {
+            padding: 10px 14px; cursor: pointer;
+            border-bottom: 1px solid #F0F4F8; font-size: 13px;
+        }
+        .ac-item:last-child { border-bottom: none; }
+        .ac-item:hover, .ac-item.focused { background: #EBF3FF; }
+        .ac-item .ac-name { font-weight: 700; color: var(--primary); margin-bottom: 2px; }
+        .ac-item .ac-addr { font-size: 11px; color: #7f8c8d; line-height: 1.35; }
+        .ac-item .ac-type { display: inline-block; font-size: 10px; background: #E8F4FF;
+            color: var(--primary); border-radius: 3px; padding: 1px 5px; margin-bottom: 3px; }
+
+        /* Facility name suggestion chips */
+        .loc-suggestions {
+            display: none; flex-wrap: wrap; gap: 6px;
+            margin-top: 7px; align-items: center;
+        }
+        .loc-suggestions .suggest-label {
+            font-size: 0.78rem; color: #596A7A; white-space: nowrap;
+        }
+        .loc-chip {
+            background: #EBF3FF; color: var(--primary);
+            border: 1px solid #B3D1F0; padding: 5px 12px;
+            border-radius: 20px; cursor: pointer; font-size: 0.82rem;
+            font-weight: 600; white-space: nowrap; transition: all 0.12s;
+        }
+        .loc-chip:hover { background: var(--primary); color: white; border-color: var(--primary); }
+
         /* History search bar */
         .history-search {
             display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
@@ -338,14 +373,18 @@
             <div class="input-group">
                 <label>Location / Facility Name</label>
                 <div class="input-with-btn">
-                    <input type="text" id="locName" placeholder="Menlo Park Campus">
+                    <input type="text" id="locName" placeholder="Menlo Park Campus" autocomplete="off">
                     <button class="btn-inline" id="fetchLocBtn" title="Auto-fill from Site Address">⟳</button>
                 </div>
+                <div id="locNameSuggestions" class="loc-suggestions"></div>
             </div>
             <div class="input-group">
                 <label>Site Address</label>
                 <div class="input-with-btn">
-                    <input type="text" id="siteAddress" placeholder="123 Technology Dr, Santa Clara, CA">
+                    <div class="autocomplete-wrapper">
+                        <input type="text" id="siteAddress" placeholder="Start typing an address…" autocomplete="off">
+                        <div id="addressDropdown" class="autocomplete-dropdown"></div>
+                    </div>
                     <button class="btn-inline" id="gpsBtn" title="Get current GPS location">📍</button>
                 </div>
             </div>
@@ -615,6 +654,134 @@
         }
     });
 
+    // --- ADDRESS AUTOCOMPLETE + VENUE NAME SUGGESTIONS ---
+    (function () {
+        const addrInput = document.getElementById('siteAddress');
+        const dropdown  = document.getElementById('addressDropdown');
+        let acAbort     = null; // AbortController for in-flight requests
+        let focusedIdx  = -1;
+
+        // Debounce helper
+        function debounce(fn, ms) {
+            let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+        }
+
+        // Build a clean short address from Nominatim address object
+        function buildShortAddress(r) {
+            const a = r.address || {};
+            const parts = [
+                a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road,
+                a.city || a.town || a.village || a.county,
+                a.state,
+                a.postcode,
+                a.country_code ? a.country_code.toUpperCase() : null
+            ].filter(Boolean);
+            return parts.length ? parts.join(', ') : r.display_name;
+        }
+
+        // Extract all candidate facility names from a result
+        function extractNames(r) {
+            const a  = r.address      || {};
+            const ex = r.extratags    || {};
+            const nd = r.namedetails  || {};
+            const candidates = [
+                r.name, nd['name:en'], nd['official_name'], nd['alt_name'],
+                ex.brand, ex.operator, ex['name:en'],
+                a.building, a.amenity, a.leisure, a.office, a.tourism,
+                a.shop, a.hotel, a.attraction
+            ].filter(v => v && v.trim().length > 1);
+            // Deduplicate, preserving order
+            return [...new Set(candidates)];
+        }
+
+        // Render the dropdown from results array
+        function renderDropdown(results) {
+            dropdown.innerHTML = '';
+            focusedIdx = -1;
+            if (!results.length) { dropdown.style.display = 'none'; return; }
+
+            results.forEach((r, i) => {
+                const names    = extractNames(r);
+                const topName  = names[0] || '';
+                const shortAddr = buildShortAddress(r);
+                const typeLabel = r.type || r.class || '';
+
+                const item = document.createElement('div');
+                item.className  = 'ac-item';
+                item.dataset.idx = i;
+                item.innerHTML  = `
+                    ${typeLabel ? `<span class="ac-type">${typeLabel}</span>` : ''}
+                    ${topName   ? `<div class="ac-name">${topName}</div>` : ''}
+                    <div class="ac-addr">${shortAddr}</div>`;
+                item.addEventListener('mousedown', e => { e.preventDefault(); selectResult(r); });
+                dropdown.appendChild(item);
+            });
+            dropdown.style.display = 'block';
+        }
+
+        // Called when user picks a result
+        function selectResult(r) {
+            addrInput.value = buildShortAddress(r);
+            dropdown.style.display = 'none';
+
+            // Populate venue/facility name suggestions
+            const names = extractNames(r);
+            const container = document.getElementById('locNameSuggestions');
+            container.innerHTML = '';
+            if (names.length) {
+                const lbl = document.createElement('span');
+                lbl.className = 'suggest-label';
+                lbl.textContent = 'Choose name:';
+                container.appendChild(lbl);
+                names.slice(0, 6).forEach(n => {
+                    const chip = document.createElement('button');
+                    chip.className   = 'loc-chip';
+                    chip.textContent = n;
+                    chip.type        = 'button';
+                    chip.addEventListener('click', () => {
+                        document.getElementById('locName').value = n;
+                        container.style.display = 'none';
+                    });
+                    container.appendChild(chip);
+                });
+                container.style.display = 'flex';
+            } else {
+                container.style.display = 'none';
+            }
+        }
+
+        // Search Nominatim
+        const doSearch = debounce(async (q) => {
+            if (q.length < 3) { dropdown.style.display = 'none'; return; }
+            if (acAbort) acAbort.abort();
+            acAbort = new AbortController();
+            try {
+                const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}`
+                          + `&format=json&addressdetails=1&namedetails=1&extratags=1&limit=7`;
+                const res = await fetch(url, { signal: acAbort.signal });
+                const data = await res.json();
+                renderDropdown(data);
+            } catch(e) {
+                if (e.name !== 'AbortError') dropdown.style.display = 'none';
+            }
+        }, 380);
+
+        addrInput.addEventListener('input',  e => doSearch(e.target.value));
+        addrInput.addEventListener('focus',  e => { if (e.target.value.length >= 3) doSearch(e.target.value); });
+        addrInput.addEventListener('blur',   () => setTimeout(() => { dropdown.style.display = 'none'; }, 180));
+
+        // Keyboard nav within dropdown
+        addrInput.addEventListener('keydown', e => {
+            const items = dropdown.querySelectorAll('.ac-item');
+            if (!items.length || dropdown.style.display === 'none') return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); focusedIdx = Math.min(focusedIdx + 1, items.length - 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); focusedIdx = Math.max(focusedIdx - 1, 0); }
+            else if (e.key === 'Enter' && focusedIdx >= 0) { e.preventDefault(); items[focusedIdx].dispatchEvent(new Event('mousedown')); return; }
+            else if (e.key === 'Escape') { dropdown.style.display = 'none'; return; }
+            items.forEach((el, i) => el.classList.toggle('focused', i === focusedIdx));
+        });
+    })();
+
     // --- PORT VISUALIZER ---
     function renderPortVisualizer() {
         const container = document.getElementById('portMappingVisualizer');
@@ -623,13 +790,13 @@
         html += '<div class="port-row main-grid">';
         for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<div class="toggle-container" title="Mark Port ${p} Active"><input type="checkbox" disabled class="port-toggle" data-port="${p}"></div>`; }
         html += '</div><div class="port-row main-grid">';
-        for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<input type="text" class="pp-input" data-port="${p}" placeholder="PP">`; }
+        for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<input type="text" inputmode="numeric" pattern="[0-9]*" class="pp-input" data-port="${p}" placeholder="PP">`; }
         html += '</div><div class="port-row main-grid">';
         for(let i=1; i<=24; i++) { let p=(i*2)-1; html += `<div class="port-label">${p}</div>`; }
         html += '</div><div class="row-spacer"></div><div class="port-row main-grid">';
         for(let i=1; i<=24; i++) { let p=i*2; html += `<div class="port-label">${p}</div>`; }
         html += '</div><div class="port-row main-grid">';
-        for(let i=1; i<=24; i++) { let p=i*2; html += `<input type="text" class="pp-input" data-port="${p}" placeholder="PP">`; }
+        for(let i=1; i<=24; i++) { let p=i*2; html += `<input type="text" inputmode="numeric" pattern="[0-9]*" class="pp-input" data-port="${p}" placeholder="PP">`; }
         html += '</div><div class="port-row main-grid">';
         for(let i=1; i<=24; i++) { let p=i*2; html += `<div class="toggle-container" title="Mark Port ${p} Active"><input type="checkbox" disabled class="port-toggle" data-port="${p}"></div>`; }
         html += '</div></div>';
